@@ -62,6 +62,7 @@ void main()
 
     position = (model * vec4(in_position, 1.0)).xyz;
 	texcoord = in_texcoord;
+    out_model = model;
 
     camera_position = (inverse(view) * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 }
@@ -97,12 +98,17 @@ void main()
     vec4 texture_normal = texture(normal_map, texcoord);
     normal = texture_normal.xyz;
     normal = normal * 2.0 - 1.0;
-    //normal = (out_model * vec4(normal, 1.0)).xyz;
+    normal = (out_model * vec4(normal, 0.0)).xyz;
 
     vec3 roughness = texture(roughness_map, texcoord).xyz;
     vec3 specular = 1.0 - roughness;
 
-    vec3 result_color = vec3(0.0, 0.0, 0.0);
+
+
+    vec3 ambient_occlusion = texture(ao_map, texcoord).rgb;
+    vec3 new_ambient = ambient * ambient_occlusion * ambient_occlusion * ambient_occlusion * ambient_occlusion;
+
+    vec3 result_color = new_ambient;
     for(int i = 0; i < 3; ++i){
         vec3 light_vector = light_position[i] - position;
         vec3 light_direction = normalize(light_vector);
@@ -115,14 +121,11 @@ void main()
         vec3 reflected_dir = 2.0 * cosine * normal - light_direction;
         vec3 camera_dir = camera_position - position;
         vec3 specular_comp = pow(max(0.0, dot(reflected_dir, camera_dir)), 4.0) * specular;
-        result_color += light_factor * light_intensity * light_color[i] + specular_comp;
+        result_color += light_factor * light_intensity * light_color[i];
     }
 
-    vec3 ambient_occlusion = texture(ao_map, texcoord).rgb;
-    vec3 new_ambient = ambient * ambient_occlusion * ambient_occlusion * ambient_occlusion * ambient_occlusion;
-
-    result_color = result_color / (vec3(1.0) + result_color);
-	out_color = vec4(result_color * new_ambient, 1.0) * texture_albedo;
+    //result_color = result_color / (vec3(1.0) + result_color);
+	out_color = vec4(result_color, 1.0) * texture_albedo;
 }
 )";
 
