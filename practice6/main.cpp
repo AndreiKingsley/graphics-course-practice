@@ -82,8 +82,9 @@ uniform vec3 light_position[3];
 uniform vec3 light_color[3];
 uniform vec3 light_attenuation[3];
 
-in vec3 camera_position;
+uniform mat4 model;
 
+in vec3 camera_position;
 
 vec3 normal;
 in vec2 texcoord;
@@ -98,7 +99,7 @@ void main()
     vec4 texture_normal = texture(normal_map, texcoord);
     normal = texture_normal.xyz;
     normal = normal * 2.0 - 1.0;
-    normal = (out_model * vec4(normal, 0.0)).xyz;
+    normal = (model * vec4(normal, 0.0)).xyz;
 
     vec3 roughness = texture(roughness_map, texcoord).xyz;
     vec3 specular = 1.0 - roughness;
@@ -119,12 +120,12 @@ void main()
         float light_intensity = 1.0 / dot(light_attenuation[i] , vec3(1.0, light_distance, light_distance * light_distance));
 
         vec3 reflected_dir = 2.0 * cosine * normal - light_direction;
-        vec3 camera_dir = camera_position - position;
+        vec3 camera_dir = normalize(camera_position - position);
         vec3 specular_comp = pow(max(0.0, dot(reflected_dir, camera_dir)), 4.0) * specular;
-        result_color += light_factor * light_intensity * light_color[i];
+        result_color += light_factor * light_intensity * light_color[i] + specular_comp;
     }
 
-    //result_color = result_color / (vec3(1.0) + result_color);
+    result_color = result_color / (vec3(1.0) + result_color);
 	out_color = vec4(result_color, 1.0) * texture_albedo;
 }
 )";
