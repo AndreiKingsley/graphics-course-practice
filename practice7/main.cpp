@@ -123,13 +123,39 @@ const char rectangle_fragment_shader_source[] =
         R"(#version 330 core
 
 uniform sampler2D render_result;
+uniform int mode;
+uniform float time;
+uniform vec2 texture_size;
+
 in vec2 texcoord;
 
 layout (location = 0) out vec4 out_color;
 
 void main()
 {
-	out_color = vec4(texture(render_result, texcoord).rgb, 1.0);
+    if (mode == 1) {
+        vec4 sum = vec4(0.0);
+        float sum_w = 0.0;
+        const int N = 7;
+        float radius = 5.0;
+        for (int x = -N; x <= N; ++x) {
+            for (int y = -N; y <= N; ++y) {
+                float c = exp(-float(x*x + y*y) / (radius*radius));
+                sum += c * texture(render_result, texcoord +
+                    vec2(x,y) / texture_size);
+                sum_w += c;
+            }
+        }
+        out_color = sum / sum_w;
+    } else if (mode == 2) {
+        out_color = vec4(texture(render_result, texcoord).rgb, 1.0);
+        out_color = floor(out_color * 4.0) / 3.0;
+    } else if (mode == 3) {
+        out_color = vec4(texture(render_result, texcoord + vec2(sin(texcoord.y * 50.0 + time) * 0.01, 0.0)).rgb, 1.0);
+    }
+    else {
+        out_color = vec4(texture(render_result, texcoord).rgb, 1.0);
+    }
 }
 )";
 
@@ -292,6 +318,9 @@ int main() try {
     GLuint center_location = glGetUniformLocation(rectangle_program, "center");
     GLuint size_location = glGetUniformLocation(rectangle_program, "size");
     GLuint render_result_location = glGetUniformLocation(rectangle_program, "render_result");
+    GLuint mode_location = glGetUniformLocation(rectangle_program, "mode");
+    GLuint texture_size_location = glGetUniformLocation(rectangle_program, "texture_size");
+    GLuint time_location = glGetUniformLocation(rectangle_program, "time");
     glUniform1i(render_result_location, 0);
 
     GLuint rectangle_vao;
@@ -417,8 +446,6 @@ int main() try {
 
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             glViewport(0, 0, width, height);
-//            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 
             glUseProgram(rectangle_program);
             if (i == 0) {
@@ -432,9 +459,9 @@ int main() try {
             }
 
             glUniform2f(size_location, 0.5f, 0.5f);
-            //glUniform1i(mode_location, i);
-            // glUniform2f(texture_size_location, width / 2.0, height / 2.0);
-            //glUniform1f(time_location, time);
+            glUniform1i(mode_location, i);
+            glUniform2f(texture_size_location, width / 2.0, height / 2.0);
+            glUniform1f(time_location, time);
             glBindVertexArray(rectangle_vao);
 
             glActiveTexture(GL_TEXTURE0);
