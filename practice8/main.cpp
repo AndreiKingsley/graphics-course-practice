@@ -41,6 +41,45 @@ void glew_fail(std::string_view message, GLenum error)
 	throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
 }
 
+const char rectangle_vertex_shader_source[] =
+        R"(#version 330 core
+
+uniform vec2 center;
+uniform vec2 size;
+
+out vec2 texcoord;
+
+vec2 vertices[6] = vec2[6](
+	vec2(-1.0, -1.0),
+	vec2( 1.0, -1.0),
+	vec2( 1.0,  1.0),
+	vec2(-1.0, -1.0),
+	vec2( 1.0,  1.0),
+	vec2(-1.0,  1.0)
+);
+
+void main()
+{
+	vec2 vertex = vertices[gl_VertexID];
+	gl_Position = vec4(vertex * size + center, 0.0, 1.0);
+	texcoord = vertex * 0.5 + vec2(0.5);
+}
+)";
+
+const char rectangle_fragment_shader_source[] =
+        R"(#version 330 core
+
+uniform sampler2D render_result;
+in vec2 texcoord;
+
+layout (location = 0) out vec4 out_color;
+
+void main()
+{
+	out_color = texture(render_result, texcoord);
+}
+)";
+
 const char vertex_shader_source[] =
 R"(#version 330 core
 
@@ -314,6 +353,36 @@ int main() try
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void*)(12));
 
+    auto rectangle_vertex_shader = create_shader(GL_VERTEX_SHADER, rectangle_vertex_shader_source);
+    auto rectangle_fragment_shader = create_shader(GL_FRAGMENT_SHADER, rectangle_fragment_shader_source);
+    auto rectangle_program = create_program(rectangle_vertex_shader, rectangle_fragment_shader);
+
+    GLuint center_location = glGetUniformLocation(rectangle_program, "center");
+    GLuint size_location = glGetUniformLocation(rectangle_program, "size");
+    GLuint render_result_location = glGetUniformLocation(rectangle_program, "render_result");
+
+    GLuint d_vao;
+    glGenTextures(1, &d_vao);
+
+    int shadow_map_res = 1024;
+    GLuint shadow_map;
+    glGenTextures(1, &shadow_map);
+    glBindTexture(GL_TEXTURE_2D, shadow_map);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, shadow_map_res, shadow_map_res, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    GLuint fbo;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+    glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, shadow_map, 0);
+
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        throw std::runtime_error("Framebuffer creation failed!");
+    }
+
 	auto last_frame_start = std::chrono::high_resolution_clock::now();
 
 	float time = 0.f;
@@ -400,6 +469,15 @@ int main() try
 
 		glBindVertexArray(vao);
 		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
+
+        glUseProgram(rectangle_program);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, shadow_map);
+        glUniform2f(center_location, -0.75f, -0.75f);
+        glUniform2f(size_location, 0.5f, 0.5f);
+        glUniform1i(render_result_location, 0);
+        glBindVertexArray(d_vao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		SDL_GL_SwapWindow(window);
 	}
