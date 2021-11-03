@@ -474,8 +474,184 @@ int main() try {
         SDL_GL_SwapWindow(window);
     }
 
-    SDL_GL_DeleteContext(gl_context);
-    SDL_DestroyWindow(window);
+	if (!window)
+		sdl2_fail("SDL_CreateWindow: ");
+
+	int width, height;
+	SDL_GetWindowSize(window, &width, &height);
+
+	SDL_GLContext gl_context = SDL_GL_CreateContext(window);
+	if (!gl_context)
+		sdl2_fail("SDL_GL_CreateContext: ");
+
+	if (auto result = glewInit(); result != GLEW_NO_ERROR)
+		glew_fail("glewInit: ", result);
+
+	if (!GLEW_VERSION_3_3)
+		throw std::runtime_error("OpenGL 3.3 is not supported");
+
+	glClearColor(0.8f, 0.8f, 1.f, 0.f);
+
+	auto dragon_vertex_shader = create_shader(GL_VERTEX_SHADER, dragon_vertex_shader_source);
+	auto dragon_fragment_shader = create_shader(GL_FRAGMENT_SHADER, dragon_fragment_shader_source);
+	auto dragon_program = create_program(dragon_vertex_shader, dragon_fragment_shader);
+
+	GLuint model_location = glGetUniformLocation(dragon_program, "model");
+	GLuint view_location = glGetUniformLocation(dragon_program, "view");
+	GLuint projection_location = glGetUniformLocation(dragon_program, "projection");
+
+	GLuint camera_position_location = glGetUniformLocation(dragon_program, "camera_position");
+
+	GLuint ambient_location = glGetUniformLocation(dragon_program, "ambient");
+	GLuint light_direction_location = glGetUniformLocation(dragon_program, "light_direction");
+	GLuint light_color_location = glGetUniformLocation(dragon_program, "light_color");
+
+	std::vector<dragon_vertex> dragon_vertices;
+	std::vector<std::uint32_t> indices;
+
+	{
+		std::ifstream dragon_file(PRACTICE_SOURCE_DIRECTORY "/dragon.raw", std::ios::binary);
+
+		std::uint32_t vertex_count;
+		std::uint32_t index_count;
+		dragon_file.read((char*)(&vertex_count), sizeof(vertex_count));
+		dragon_file.read((char*)(&index_count), sizeof(index_count));
+
+		dragon_vertices.resize(vertex_count);
+		indices.resize(index_count);
+		dragon_file.read((char*)dragon_vertices.data(), dragon_vertices.size() * sizeof(dragon_vertices[0]));
+		dragon_file.read((char*)indices.data(), indices.size() * sizeof(indices[0]));
+	}
+
+	std::cout << "Loaded " << dragon_vertices.size() << " vertices, " << indices.size() << " indices" << std::endl;
+
+	GLuint dragon_vao, dragon_vbo, dragon_ebo;
+	glGenVertexArrays(1, &dragon_vao);
+	glBindVertexArray(dragon_vao);
+
+	glGenBuffers(1, &dragon_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, dragon_vbo);
+	glBufferData(GL_ARRAY_BUFFER, dragon_vertices.size() * sizeof(dragon_vertices[0]), dragon_vertices.data(), GL_STATIC_DRAW);
+
+	glGenBuffers(1, &dragon_ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dragon_ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices[0]), indices.data(), GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(dragon_vertex), (void*)(0));
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_BYTE, GL_TRUE, sizeof(dragon_vertex), (void*)(12));
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 1, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(dragon_vertex), (void*)(15));
+
+	auto rectangle_vertex_shader = create_shader(GL_VERTEX_SHADER, rectangle_vertex_shader_source);
+	auto rectangle_fragment_shader = create_shader(GL_FRAGMENT_SHADER, rectangle_fragment_shader_source);
+	auto rectangle_program = create_program(rectangle_vertex_shader, rectangle_fragment_shader);
+
+	GLuint center_location = glGetUniformLocation(rectangle_program, "center");
+	GLuint size_location = glGetUniformLocation(rectangle_program, "size");
+
+	GLuint rectangle_vao;
+	glGenVertexArrays(1, &rectangle_vao);
+
+	auto last_frame_start = std::chrono::high_resolution_clock::now();
+
+	float time = 0.f;
+
+	std::map<SDL_Keycode, bool> button_down;
+
+	float view_angle = 0.f;
+	float camera_distance = 0.5f;
+	float model_angle = glm::pi<float>() / 2.f;
+	float model_scale = 1.f;
+
+	bool running = true;
+	while (running)
+	{
+		for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
+		{
+		case SDL_QUIT:
+			running = false;
+			break;
+		case SDL_WINDOWEVENT: switch (event.window.event)
+			{
+			case SDL_WINDOWEVENT_RESIZED:
+				width = event.window.data1;
+				height = event.window.data2;
+				glViewport(0, 0, width, height);
+				break;
+			}
+			break;
+		case SDL_KEYDOWN:
+			button_down[event.key.keysym.sym] = true;
+			break;
+		case SDL_KEYUP:
+			button_down[event.key.keysym.sym] = false;
+			break;
+		}
+
+		if (!running)
+			break;
+
+		auto now = std::chrono::high_resolution_clock::now();
+		float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+		last_frame_start = now;
+		time += dt;
+
+		if (button_down[SDLK_UP])
+			camera_distance -= 1.f * dt;
+		if (button_down[SDLK_DOWN])
+			camera_distance += 1.f * dt;
+
+		if (button_down[SDLK_LEFT])
+			model_angle -= 2.f * dt;
+		if (button_down[SDLK_RIGHT])
+			model_angle += 2.f * dt;
+
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_CULL_FACE);
+
+		float near = 0.1f;
+		float far = 100.f;
+
+		glm::mat4 model(1.f);
+		model = glm::rotate(model, model_angle, {0.f, 1.f, 0.f});
+		model = glm::scale(model, glm::vec3(model_scale));
+
+		glm::mat4 view(1.f);
+		view = glm::translate(view, {0.f, 0.f, -camera_distance});
+		view = glm::rotate(view, view_angle, {1.f, 0.f, 0.f});
+
+		glm::mat4 projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
+
+		glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
+
+		glUseProgram(dragon_program);
+		glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
+
+		glUniform3fv(camera_position_location, 1, (float*)(&camera_position));
+
+		glUniform3f(ambient_location, 0.2f, 0.2f, 0.4f);
+		glUniform3f(light_direction_location, 1.f / std::sqrt(3.f), 1.f / std::sqrt(3.f), 1.f / std::sqrt(3.f));
+		glUniform3f(light_color_location, 0.8f, 0.3f, 0.f);
+
+		glBindVertexArray(dragon_vao);
+		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
+
+		glUseProgram(rectangle_program);
+		glUniform2f(center_location, -0.5f, -0.5f);
+		glUniform2f(size_location, 0.5f, 0.5f);
+		glBindVertexArray(rectangle_vao);
+//		glDrawArrays(GL_TRIANGLES, 0, 6);
+
+		SDL_GL_SwapWindow(window);
+	}
+
+	SDL_GL_DeleteContext(gl_context);
+	SDL_DestroyWindow(window);
 }
 catch (std::exception const &e) {
     std::cerr << e.what() << std::endl;
