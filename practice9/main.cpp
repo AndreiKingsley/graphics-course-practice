@@ -9,6 +9,7 @@
 
 #include <GL/glew.h>
 
+#include "shader_program.h"
 #include <string_view>
 #include <stdexcept>
 #include <iostream>
@@ -76,9 +77,9 @@ const char fragment_shader_source[] = R"(
 #version 330 core
 out vec4 out_color;
 uniform vec3 ambient;
-uniform vec3 light_position[5];
-uniform vec3 light_color[5];
-uniform vec3 light_attenuation[5];
+uniform vec3 light_position[3];
+uniform vec3 light_color[3];
+uniform vec3 light_attenuation[3];
 uniform mat4 transform;
 uniform sampler2D texture_diffuse;
 uniform sampler2D texture_normal;
@@ -116,7 +117,7 @@ void main()
     vec3 result_color = vec3(0.0, 0.0, 0.0);
     result_color += ambient;
     result_color += light_source(position, light_position[0], light_color[0], light_attenuation[0]) * shadow_factor;
-    for (int i = 1; i < 5; i++) {
+    for (int i = 1; i < 3; i++) {
         result_color += light_source(position, light_position[i], light_color[i], light_attenuation[i]);
     }
     result_color = texture(texture_diffuse, tex_coords).rgb * result_color;
@@ -139,37 +140,9 @@ void main()
 {}
 )";
 
-/*
-const char debug_vertex_shader_source[] = R"(#version 330 core
-vec2 vertices[6] = vec2[6](
-	vec2(-1.0, -1.0),
-	vec2( 1.0, -1.0),
-	vec2( 1.0,  1.0),
-	vec2(-1.0, -1.0),
-	vec2( 1.0,  1.0),
-	vec2(-1.0,  1.0)
-);
-out vec2 texcoord;
-void main()
-{
-	vec2 position = vertices[gl_VertexID];
-	gl_Position = vec4(position * 0.25 + vec2(-0.75, -0.75), 0.0, 1.0);
-	texcoord = position * 0.5 + vec2(0.5);
-}
-)";
 
-const char debug_fragment_shader_source[] = R"(#version 330 core
-uniform sampler2D shadow_map;
-in vec2 texcoord;
-layout (location = 0) out vec4 out_color;
-void main()
-{
-	out_color = texture(shadow_map, texcoord);
-}
-)";
-*/
 int main() try {
-    // Setting up window
+
     int width, height;
     SDL_Window *window;
     SDL_GLContext gl_context;
@@ -210,9 +183,25 @@ int main() try {
 
     glEnable(GL_DEPTH_TEST);
 
-    // build and compile shaders
-    ShaderProgram ourShader(vertex_shader_source, fragment_shader_source);
 
+    shader_program main_program;
+    main_program.create(vertex_shader_source, fragment_shader_source);
+    /*
+    std::vector<const char *> uniform_vars {
+        "model",
+        "view",
+        "projection",
+        "transform",
+        "ambient",
+        "has_norm"
+    };
+    for (int i = 0; i < 5; ++i) {
+        uniform_vars.push_back(("light_position[" + std::to_string(i) + "]").c_str());
+        uniform_vars.push_back(("light_color[" + std::to_string(i) + "]").c_str());
+        uniform_vars.push_back(("light_attenuation[" + std::to_string(i) + "]").c_str());
+    }
+    main_program.setup_locations(uniform_vars);
+*/
     /*
     auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
     auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
@@ -256,40 +245,43 @@ int main() try {
 
 
 
-    // Cam Position
-    glm::vec3 cameraPos = glm::vec3(0.0f, 1.f, 0.0f);
-    glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-    float yaw = -90.f;
-    float pitch = 0.f;
+    glm::vec3 camera_position = glm::vec3(0.0f, 1.f, 0.0f);
+    glm::vec3 camera_direction = glm::vec3(0.0f, 0.0f, -1.0f);
 
-    //glUniform3f(ambient_location, 0.1f, 0.1f, 0.1f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
 
-    const int num_of_light = 5;
-    glm::vec3 light_position[num_of_light] = {
-            glm::vec3(0.0f, 5.0f, 0.0f), // SUN
+    float y_angle = -90.f;
+    float x_angle = 0.f;
+
+    auto sun_position = glm::vec3(-15.f, 40.f, 5.f);
+
+    glm::vec3 light_position[3] = {
+            sun_position,
             glm::vec3(10.0f, 3.5f, -4.f),
-            glm::vec3(-11.73f, 2.38f, -4.69f),
-            glm::vec3(-12.23f, 2.38f, 4.61f),
-            glm::vec3(11.25f, 2.38f, 4.08f),
+            glm::vec3(-12.f, 5.f, 5.69f),
     };
-    glm::vec3 light_color[num_of_light] = {
-            glm::vec3(5.0f, 5.0f, 5.0f), // SUN
-            glm::vec3(0.5f, 3.f, 3.0f),
-            glm::vec3(0.f, 0.f, 0.0f),
-            glm::vec3(0.f, 0.f, 0.0f),
-            glm::vec3(0.f, 0.f, 0.0f),
+    glm::vec3 light_color[3] = {
+            glm::vec3(8.0f, 8.0f, 4.0f),
+            glm::vec3(2.5f, 9.f, 3.0f),
+            glm::vec3(10.f, 0.f, 0.0f),
     };
-    glm::vec3 light_attenuation[num_of_light] = {
-            glm::vec3(1.0f, 0.00001, 0.01f), // SUN
-            glm::vec3(1.0f, 0, 0.01f),
-            glm::vec3(1.0f, 0, 0.01f),
+    glm::vec3 light_attenuation[3] = {
+            glm::vec3(1.0f, 0.00001, 0.01f),
             glm::vec3(1.0f, 0, 0.01f),
             glm::vec3(1.0f, 0, 0.01f),
     };
 
-    // Shadows
-    GLsizei shadow_map_resolution = 4096;
+    main_program.use();
+
+    auto ambient = glm::vec3(0.1f, 0.1f, 0.1f);
+    main_program.set_vec3("ambient", ambient);
+    for (int i = 0; i < 3; i++) {
+        main_program.set_vec3(("light_position[" + std::to_string(i) + "]").c_str(), light_position[i]);
+        main_program.set_vec3(("light_color[" + std::to_string(i) + "]").c_str(), light_color[i]);
+        main_program.set_vec3(("light_attenuation[" + std::to_string(i) + "]").c_str(), light_attenuation[i]);
+    }
+
+    GLsizei shadow_map_resolution = 3500;
 
     GLuint shadow_map;
     glGenTextures(1, &shadow_map);
@@ -309,21 +301,16 @@ int main() try {
         throw std::runtime_error("Incomplete framebuffer!");
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
-    ShaderProgram shadow_program = ShaderProgram(shadow_vertex_shader_source, shadow_fragment_shader_source);
+    shader_program shadow_program;
+    shadow_program.create(shadow_vertex_shader_source, shadow_fragment_shader_source);
 
     for (auto &obj: main_scene.objects) {
         obj.textures.push_back({shadow_map, "shadow_map"});
     }
 
-    // Debug shadow
-/*
-    ShaderProgram debug_program = ShaderProgram(debug_vertex_shader_source, debug_fragment_shader_source);
-    GLuint debug_vao;
-    glGenVertexArrays(1, &debug_vao);
-*/
     bool running = true;
     while (running) {
-        // Keyboard events
+
         {
             for (SDL_Event event; SDL_PollEvent(&event);)
                 switch (event.type) {
@@ -358,43 +345,41 @@ int main() try {
 
 
         glm::vec3 direction;
-        direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-        direction.y = sin(glm::radians(pitch));
-        direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-        cameraFront = glm::normalize(direction);
+        direction.x = cos(glm::radians(y_angle)) * cos(glm::radians(x_angle));
+        direction.y = sin(glm::radians(x_angle));
+        direction.z = sin(glm::radians(y_angle)) * cos(glm::radians(x_angle));
+        camera_direction = glm::normalize(direction);
 
-        // Keyboard response
         {
-            float rotation_speed = 75.f;
+            float rotation_speed = 50.f;
             if (button_down[SDLK_UP])
-                pitch += rotation_speed * dt;
+                x_angle += rotation_speed * dt;
             if (button_down[SDLK_DOWN])
-                pitch -= rotation_speed * dt;
+                x_angle -= rotation_speed * dt;
 
             if (button_down[SDLK_LEFT])
-                yaw -= rotation_speed * dt;
+                y_angle -= rotation_speed * dt;
             if (button_down[SDLK_RIGHT])
-                yaw += rotation_speed * dt;
+                y_angle += rotation_speed * dt;
 
             float cameraSpeed = 0.1f;
             if (button_down[SDLK_w])
-                cameraPos += cameraSpeed * cameraFront;
+                camera_position += cameraSpeed * camera_direction;
 
             if (button_down[SDLK_s])
-                cameraPos -= cameraSpeed * cameraFront;
+                camera_position -= cameraSpeed * camera_direction;
 
             if (button_down[SDLK_d])
-                cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+                camera_position += glm::normalize(glm::cross(camera_direction, up)) * cameraSpeed;
 
             if (button_down[SDLK_a])
-                cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+                camera_position -= glm::normalize(glm::cross(camera_direction, up)) * cameraSpeed;
         }
 
         glClearColor(0.8f, 0.8f, 0.9f, 0.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glm::vec3 light_direction = glm::normalize(glm::vec3(-11.5685, 27.2606, 2.32783));
-        light_position[0] = glm::vec3(-11.5685, 27.2606, 2.32783);
+        glm::vec3 light_direction = glm::normalize(sun_position);
 
         float near = 0.1f;
         float far = 100.f;
@@ -407,7 +392,7 @@ int main() try {
 
         glm::mat4 view(1.f);
 
-        view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+        view = glm::lookAt(camera_position, camera_position + camera_direction, up);
 
         glm::mat4 projection = glm::mat4(1.f);
         projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
@@ -425,7 +410,6 @@ int main() try {
         }
 
 
-//         Draw shadows to shadow_map
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
@@ -438,17 +422,16 @@ int main() try {
 
         shadow_program.use();
 
-        shadow_program.setMatrix("model", model);
-        shadow_program.setMatrix("transform", transform);
+        shadow_program.set_matrix("model", model);
+        shadow_program.set_matrix("transform", transform);
 
         for (auto obj: main_scene.objects) {
-            obj.draw(shadow_program.ID);
+            obj.draw(shadow_program.id);
         }
 
         glBindTexture(GL_TEXTURE_2D, shadow_map);
         glGenerateMipmap(GL_TEXTURE_2D);
 
-//        // Draw model
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glViewport(0, 0, width, height);
 
@@ -461,34 +444,15 @@ int main() try {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
 
-        /*
-        glUseProgram(program);
-        glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
-        glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
-        glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
-        glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
-
-        for (auto object : main_scene.objects) {
-            glUniform1i(has_norm_location, object.has_normal_tex);
-            object.draw(program);
-        } */
-
-        ourShader.use();
-        ourShader.setMatrix("projection", projection);
-        ourShader.setMatrix("view", view);
-        ourShader.setMatrix("model", model);
-        ourShader.setMatrix("transform", transform);
-        auto ambient = glm::vec3(0.2f, 0.2f, 0.2f);
-        ourShader.setVec3("ambient", ambient);
-        for (int i = 0; i < num_of_light; i++) {
-            ourShader.setVec3("light_position[" + std::to_string(i) + "]", light_position[i]);
-            ourShader.setVec3("light_color[" + std::to_string(i) + "]", light_color[i]);
-            ourShader.setVec3("light_attenuation[" + std::to_string(i) + "]", light_attenuation[i]);
-        }
+        main_program.use();
+        main_program.set_matrix("projection", projection);
+        main_program.set_matrix("view", view);
+        main_program.set_matrix("model", model);
+        main_program.set_matrix("transform", transform);
 
         for (auto obj: main_scene.objects) {
-            ourShader.setInt("has_norm", obj.has_normal_tex);
-            obj.draw(ourShader.ID);
+            main_program.set_int("has_norm", obj.has_normal_tex);
+            obj.draw(main_program.id);
         }
 
         SDL_GL_SwapWindow(window);
