@@ -21,10 +21,11 @@ if(APPLE)
 endif()
 
 add_subdirectory(glm)
+add_subdirectory(assimp)
 
 set(TARGET_NAME "${PROJECT_NAME}")
 
-add_executable(${TARGET_NAME} main.cpp)
+add_executable(${TARGET_NAME} main.cpp shader.h mesh.h model.h stb_image.h scene_object.h common.h scene.h shader_program.h)
 target_compile_definitions(${TARGET_NAME} PUBLIC
 	"PRACTICE_SOURCE_DIRECTORY=\"${CMAKE_CURRENT_SOURCE_DIR}\""
 )
@@ -32,10 +33,13 @@ target_include_directories(${TARGET_NAME} PUBLIC
 	"${SDL2_INCLUDE_DIRS}"
 	"${GLEW_INCLUDE_DIRS}"
 	"${OPENGL_INCLUDE_DIRS}"
+	"${ASSIMP_INCLUDE_DIRS}"
 )
 target_link_libraries(${TARGET_NAME} PUBLIC
 	glm
+	assimp
 	"${GLEW_LIBRARIES}"
 	"${SDL2_LIBRARIES}"
 	"${OPENGL_LIBRARIES}"
+	"${ASSIMP_LIBRARIES}"
 )
