@@ -75,7 +75,7 @@ void main()
 
 const char fragment_shader_source[] = R"(
 #version 330 core
-out vec4 out_color;
+
 uniform vec3 ambient;
 uniform vec3 light_position[3];
 uniform vec3 light_color[3];
@@ -85,20 +85,23 @@ uniform sampler2D texture_diffuse;
 uniform sampler2D texture_normal;
 uniform sampler2D shadow_map;
 uniform int has_norm;
+
 in vec3 position;
 in vec2 tex_coords;
 in vec3 normal;
 
+out vec4 out_color;
+
 vec3 real_normal;
 
-vec3 light_source(vec3 position1, vec3 light_position1, vec3 light_color1, vec3 light_attenuation1) {
-    vec3 light_vector = light_position1 - position1;
+vec3 count_light(vec3 position, vec3 light_position, vec3 light_color, vec3 light_attenuation) {
+    vec3 light_vector = light_position - position;
     vec3 light_direction = normalize(light_vector);
     float cosine = dot(real_normal, light_direction);
     float light_factor = max(0.0, cosine);
     float light_distance = length(light_vector);
-    float light_intensity = 1.0 / dot(light_attenuation1, vec3(1.0, light_distance, light_distance * light_distance));
-    return light_factor * light_intensity * light_color1;
+    float light_intensity = 1.0 / dot(light_attenuation, vec3(1.0, light_distance, light_distance * light_distance));
+    return light_factor * light_intensity * light_color;
 }
 void main()
 {
@@ -107,18 +110,28 @@ void main()
     } else {
         real_normal = (vec4(2 * texture(texture_normal, tex_coords).rgb - 1.0, 0.0)).xyz;
     }
+
     vec4 shadow_pos = transform * vec4(position, 1.0);
-	shadow_pos /= shadow_pos.w;
-	shadow_pos = shadow_pos * 0.5 + vec4(0.5);
-    bool in_shadow_texture = (shadow_pos.x > 0.0) && (shadow_pos.x < 1.0) && (shadow_pos.y > 0.0) && (shadow_pos.y < 1.0) && (shadow_pos.z > 0.0) && (shadow_pos.z < 1.0);
+	shadow_pos = shadow_pos / shadow_pos.w  * 0.5 + vec4(0.5);
+
+    bool is_shadowed =
+        (shadow_pos.x > 0.0)
+        && (shadow_pos.x < 1.0)
+        && (shadow_pos.y > 0.0)
+        && (shadow_pos.y < 1.0)
+        && (shadow_pos.z > 0.0)
+        && (shadow_pos.z < 1.0);
+
 	float shadow_factor = 1.0;
-	if (in_shadow_texture)
-		shadow_factor = (texture(shadow_map, shadow_pos.xy).r < shadow_pos.z - 0.005) ? 0.0 : 1.0;
-    vec3 result_color = vec3(0.0, 0.0, 0.0);
-    result_color += ambient;
-    result_color += light_source(position, light_position[0], light_color[0], light_attenuation[0]) * shadow_factor;
+	if (is_shadowed && texture(shadow_map, shadow_pos.xy).x < shadow_pos.z - 0.001) {
+        shadow_factor = 0.0;
+    }
+    vec3 result_color = ambient;
+
+    result_color += count_light(position, light_position[0], light_color[0], light_attenuation[0]) * shadow_factor;
+
     for (int i = 1; i < 3; i++) {
-        result_color += light_source(position, light_position[i], light_color[i], light_attenuation[i]);
+        result_color += count_light(position, light_position[i], light_color[i], light_attenuation[i]);
     }
     result_color = texture(texture_diffuse, tex_coords).rgb * result_color;
     out_color = vec4(result_color, 1.0);
@@ -186,56 +199,14 @@ int main() try {
 
     shader_program main_program;
     main_program.create(vertex_shader_source, fragment_shader_source);
-    /*
-    std::vector<const char *> uniform_vars {
-        "model",
-        "view",
-        "projection",
-        "transform",
-        "ambient",
-        "has_norm"
-    };
-    for (int i = 0; i < 5; ++i) {
-        uniform_vars.push_back(("light_position[" + std::to_string(i) + "]").c_str());
-        uniform_vars.push_back(("light_color[" + std::to_string(i) + "]").c_str());
-        uniform_vars.push_back(("light_attenuation[" + std::to_string(i) + "]").c_str());
-    }
-    main_program.setup_locations(uniform_vars);
-*/
-    /*
-    auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
-    auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
-    auto program = create_program(vertex_shader, fragment_shader);
-
-    GLuint model_location = glGetUniformLocation(program, "model");
-    GLuint view_location = glGetUniformLocation(program, "view");
-    GLuint projection_location = glGetUniformLocation(program, "projection");
-    GLuint transform_location = glGetUniformLocation(program, "transform");
-    GLuint ambient_location = glGetUniformLocation(program, "ambient");
-
-    GLuint light_position_location_0 = glGetUniformLocation(program, "light_position[0]");
-    GLuint light_attenuation_location_0 = glGetUniformLocation(program, "light_attenuation[0]");
-    GLuint light_color_location_0 = glGetUniformLocation(program, "light_color[0]");
-
-    GLuint light_position_location_1 = glGetUniformLocation(program, "light_position[1]");
-    GLuint light_attenuation_location_1 = glGetUniformLocation(program, "light_attenuation[1]");
-    GLuint light_color_location_1 = glGetUniformLocation(program, "light_color[1]");
-
-    GLuint light_position_location_2 = glGetUniformLocation(program, "light_position[2]");
-    GLuint light_attenuation_location_2 = glGetUniformLocation(program, "light_attenuation[2]");
-    GLuint light_color_location_2 = glGetUniformLocation(program, "light_color[2]");
-
-    GLuint has_norm_location = glGetUniformLocation(program, "has_norm");
-
-
-
-    */
-
 
     std::string path = PRACTICE_SOURCE_DIRECTORY;
 
     scene main_scene;
     main_scene.load(PRACTICE_SOURCE_DIRECTORY, "sponza.obj");
+
+    scene bunny_scene;
+    bunny_scene.load(PRACTICE_SOURCE_DIRECTORY, "bunny.obj");
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -250,7 +221,7 @@ int main() try {
 
     glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
 
-    float y_angle = -90.f;
+    float y_angle = 0.f;
     float x_angle = 0.f;
 
     auto sun_position = glm::vec3(-15.f, 40.f, 5.f);
@@ -267,8 +238,8 @@ int main() try {
     };
     glm::vec3 light_attenuation[3] = {
             glm::vec3(1.0f, 0.00001, 0.01f),
-            glm::vec3(1.0f, 0, 0.01f),
-            glm::vec3(1.0f, 0, 0.01f),
+            glm::vec3(1.0f, 0, 0.1f),
+            glm::vec3(1.0f, 0, 0.1f),
     };
 
     main_program.use();
@@ -281,7 +252,7 @@ int main() try {
         main_program.set_vec3(("light_attenuation[" + std::to_string(i) + "]").c_str(), light_attenuation[i]);
     }
 
-    GLsizei shadow_map_resolution = 3500;
+    GLsizei shadow_map_resolution = 4500;
 
     GLuint shadow_map;
     glGenTextures(1, &shadow_map);
@@ -351,7 +322,7 @@ int main() try {
         camera_direction = glm::normalize(direction);
 
         {
-            float rotation_speed = 50.f;
+            float rotation_speed = 100.f;
             if (button_down[SDLK_UP])
                 x_angle += rotation_speed * dt;
             if (button_down[SDLK_DOWN])
@@ -362,18 +333,18 @@ int main() try {
             if (button_down[SDLK_RIGHT])
                 y_angle += rotation_speed * dt;
 
-            float cameraSpeed = 0.1f;
+            float speed = 0.1f;
             if (button_down[SDLK_w])
-                camera_position += cameraSpeed * camera_direction;
+                camera_position += speed * camera_direction;
 
             if (button_down[SDLK_s])
-                camera_position -= cameraSpeed * camera_direction;
+                camera_position -= speed * camera_direction;
 
             if (button_down[SDLK_d])
-                camera_position += glm::normalize(glm::cross(camera_direction, up)) * cameraSpeed;
+                camera_position += glm::normalize(glm::cross(camera_direction, up)) * speed;
 
             if (button_down[SDLK_a])
-                camera_position -= glm::normalize(glm::cross(camera_direction, up)) * cameraSpeed;
+                camera_position -= glm::normalize(glm::cross(camera_direction, up)) * speed;
         }
 
         glClearColor(0.8f, 0.8f, 0.9f, 0.f);
@@ -385,8 +356,7 @@ int main() try {
         float far = 100.f;
 
         glm::mat4 model = glm::mat4(1.f);
-        float sponza_scale = 0.01f;
-        glm::vec3 scale = glm::vec3(sponza_scale, sponza_scale, sponza_scale);
+        glm::vec3 scale = glm::vec3(0.01f);
         model = glm::scale(model, scale);
 
 
@@ -451,6 +421,16 @@ int main() try {
         main_program.set_matrix("transform", transform);
 
         for (auto obj: main_scene.objects) {
+            main_program.set_int("has_norm", obj.has_normal_tex);
+            obj.draw(main_program.id);
+        }
+
+        model = glm::mat4(4.f);
+        model = glm::translate(model, glm::vec3(time, 0.f, 0.f));
+        main_program.set_matrix("model", model);
+
+
+        for (auto obj: bunny_scene.objects) {
             main_program.set_int("has_norm", obj.has_normal_tex);
             obj.draw(main_program.id);
         }

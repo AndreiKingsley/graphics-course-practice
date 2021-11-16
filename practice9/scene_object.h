@@ -24,6 +24,7 @@ struct scene_object {
 
         for (auto t: mesh.textures) {
             textures.push_back({t.id, t.type});
+            std::cout << t.type << std::endl;
             if (t.type == "texture_normal") {
                 has_normal_tex = 1;
             }

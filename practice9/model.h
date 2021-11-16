@@ -159,8 +159,8 @@ private:
         textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
         // 3. normal maps
         std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_HEIGHT, "texture_normal");
+        std::cout << normalMaps.size() << std::endl;
         textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
-        // 4. height maps
         std::vector<Texture> heightMaps = loadMaterialTextures(material, aiTextureType_AMBIENT, "texture_height");
         textures.insert(textures.end(), heightMaps.begin(), heightMaps.end());
 
