@@ -70,6 +70,10 @@ uniform vec3 ambient;
 uniform vec3 light_direction;
 uniform vec3 light_color;
 
+uniform mat4 transform;
+
+uniform sampler2D shadow_map;
+
 in vec3 position;
 in vec3 normal;
 
@@ -77,12 +81,81 @@ layout (location = 0) out vec4 out_color;
 
 void main()
 {
+	vec4 shadow_pos = transform * vec4(position, 1.0);
+	shadow_pos /= shadow_pos.w;
+	shadow_pos = shadow_pos * 0.5 + vec4(0.5);
+
+	bool in_shadow_texture = (shadow_pos.x > 0.0) && (shadow_pos.x < 1.0) && (shadow_pos.y > 0.0) && (shadow_pos.y < 1.0) && (shadow_pos.z > 0.0) && (shadow_pos.z < 1.0);
+	float shadow_factor = 1.0;
+	if (in_shadow_texture)
+		shadow_factor = (texture(shadow_map, shadow_pos.xy).r < shadow_pos.z) ? 0.0 : 1.0;
+
 	vec3 albedo = vec3(1.0, 1.0, 1.0);
 
-	vec3 light = ambient + light_color * max(0.0, dot(normal, light_direction));
+	vec3 light = ambient;
+	light += light_color * max(0.0, dot(normal, light_direction)) * shadow_factor;
 	vec3 color = albedo * light;
+
 	out_color = vec4(color, 1.0);
 }
+)";
+
+const char debug_vertex_shader_source[] =
+R"(#version 330 core
+
+vec2 vertices[6] = vec2[6](
+	vec2(-1.0, -1.0),
+	vec2( 1.0, -1.0),
+	vec2( 1.0,  1.0),
+	vec2(-1.0, -1.0),
+	vec2( 1.0,  1.0),
+	vec2(-1.0,  1.0)
+);
+
+out vec2 texcoord;
+
+void main()
+{
+	vec2 position = vertices[gl_VertexID];
+	gl_Position = vec4(position * 0.25 + vec2(-0.75, -0.75), 0.0, 1.0);
+	texcoord = position * 0.5 + vec2(0.5);
+}
+)";
+
+const char debug_fragment_shader_source[] =
+R"(#version 330 core
+
+uniform sampler2D shadow_map;
+
+in vec2 texcoord;
+
+layout (location = 0) out vec4 out_color;
+
+void main()
+{
+	out_color = texture(shadow_map, texcoord);
+}
+)";
+
+const char shadow_vertex_shader_source[] =
+R"(#version 330 core
+
+uniform mat4 model;
+uniform mat4 transform;
+
+layout (location = 0) in vec3 in_position;
+
+void main()
+{
+	gl_Position = transform * model * vec4(in_position, 1.0);
+}
+)";
+
+const char shadow_fragment_shader_source[] =
+R"(#version 330 core
+
+void main()
+{}
 )";
 
 GLuint create_shader(GLenum type, const char * source)
@@ -197,7 +270,7 @@ void add_ground_plane(std::vector<vertex> & vertices, std::vector<std::uint32_t>
 	size.x = size.z = std::max(size.x, size.z);
 
 	float W = 5.f;
-	float H = 1.5f;
+	float H = 0.5f;
 
 	vertex v0, v1, v2, v3;
 	v0.position = {center.x - W * size.x, center.y - H * size.y, center.z - W * size.z};
@@ -254,7 +327,7 @@ int main() try
 	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-	SDL_Window * window = SDL_CreateWindow("Graphics course practice 8",
+	SDL_Window * window = SDL_CreateWindow("Graphics course practice 9",
 		SDL_WINDOWPOS_CENTERED,
 		SDL_WINDOWPOS_CENTERED,
 		800, 600,
@@ -283,10 +356,32 @@ int main() try
 	GLuint model_location = glGetUniformLocation(program, "model");
 	GLuint view_location = glGetUniformLocation(program, "view");
 	GLuint projection_location = glGetUniformLocation(program, "projection");
+	GLuint transform_location = glGetUniformLocation(program, "transform");
 
 	GLuint ambient_location = glGetUniformLocation(program, "ambient");
 	GLuint light_direction_location = glGetUniformLocation(program, "light_direction");
 	GLuint light_color_location = glGetUniformLocation(program, "light_color");
+
+	GLuint shadow_map_location = glGetUniformLocation(program, "shadow_map");
+
+	glUseProgram(program);
+	glUniform1i(shadow_map_location, 0);
+
+	auto debug_vertex_shader = create_shader(GL_VERTEX_SHADER, debug_vertex_shader_source);
+	auto debug_fragment_shader = create_shader(GL_FRAGMENT_SHADER, debug_fragment_shader_source);
+	auto debug_program = create_program(debug_vertex_shader, debug_fragment_shader);
+
+	GLuint debug_shadow_map_location = glGetUniformLocation(debug_program, "shadow_map");
+
+	glUseProgram(debug_program);
+	glUniform1i(debug_shadow_map_location, 0);
+
+	auto shadow_vertex_shader = create_shader(GL_VERTEX_SHADER, shadow_vertex_shader_source);
+	auto shadow_fragment_shader = create_shader(GL_FRAGMENT_SHADER, shadow_fragment_shader_source);
+	auto shadow_program = create_program(shadow_vertex_shader, shadow_fragment_shader);
+
+	GLuint shadow_model_location = glGetUniformLocation(shadow_program, "model");
+	GLuint shadow_transform_location = glGetUniformLocation(shadow_program, "transform");
 
 	std::vector<vertex> vertices;
 	std::vector<std::uint32_t> indices;
@@ -314,15 +409,39 @@ int main() try
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void*)(12));
 
+	GLuint debug_vao;
+	glGenVertexArrays(1, &debug_vao);
+
+	GLsizei shadow_map_resolution = 1024;
+
+	GLuint shadow_map;
+	glGenTextures(1, &shadow_map);
+	glBindTexture(GL_TEXTURE_2D, shadow_map);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, shadow_map_resolution, shadow_map_resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+	GLuint shadow_fbo;
+	glGenFramebuffers(1, &shadow_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
+	glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, shadow_map, 0);
+	if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		throw std::runtime_error("Incomplete framebuffer!");
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
 	auto last_frame_start = std::chrono::high_resolution_clock::now();
 
 	float time = 0.f;
+	bool paused = false;
 
 	std::map<SDL_Keycode, bool> button_down;
 
-	float view_elevation = glm::radians(30.f);
+	float view_elevation = glm::radians(45.f);
 	float view_azimuth = 0.f;
 	float camera_distance = 0.5f;
+	float camera_target = 0.05f;
 	bool running = true;
 	while (running)
 	{
@@ -342,6 +461,10 @@ int main() try
 			break;
 		case SDL_KEYDOWN:
 			button_down[event.key.keysym.sym] = true;
+
+			if (event.key.keysym.sym == SDLK_SPACE)
+				paused = !paused;
+
 			break;
 		case SDL_KEYUP:
 			button_down[event.key.keysym.sym] = false;
@@ -354,7 +477,8 @@ int main() try
 		auto now = std::chrono::high_resolution_clock::now();
 		float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
 		last_frame_start = now;
-		time += dt;
+		if (!paused)
+			time += dt;
 
 		if (button_down[SDLK_UP])
 			camera_distance -= 1.f * dt;
@@ -366,6 +490,46 @@ int main() try
 		if (button_down[SDLK_RIGHT])
 			view_azimuth += 2.f * dt;
 
+		glm::mat4 model(1.f);
+
+		glm::vec3 light_direction = glm::normalize(glm::vec3(std::cos(time * 0.5f), 1.f, std::sin(time * 0.5f)));
+
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
+
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_BACK);
+
+		glm::vec3 light_z = -light_direction;
+		glm::vec3 light_x = glm::normalize(glm::cross(light_z, {0.f, 1.f, 0.f}));
+		glm::vec3 light_y = glm::cross(light_x, light_z);
+		float shadow_scale = 2.f;
+
+		glm::mat4 transform = glm::mat4(1.f);
+		for (size_t i = 0; i < 3; ++i)
+		{
+			transform[i][0] = shadow_scale * light_x[i];
+			transform[i][1] = shadow_scale * light_y[i];
+			transform[i][2] = shadow_scale * light_z[i];
+		}
+
+		glUseProgram(shadow_program);
+		glUniformMatrix4fv(shadow_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+		glUniformMatrix4fv(shadow_transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
+
+		glBindVertexArray(vao);
+		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
+
+		glBindTexture(GL_TEXTURE_2D, shadow_map);
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glViewport(0, 0, width, height);
+
 		glClearColor(0.8f, 0.8f, 0.9f, 0.f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -373,26 +537,27 @@ int main() try
 		glDepthFunc(GL_LEQUAL);
 
 		glEnable(GL_CULL_FACE);
-
-		glm::vec3 light_direction = glm::normalize(glm::vec3(std::cos(time * 0.5f), 1.f, std::sin(time * 0.5f)));
+		glCullFace(GL_BACK);
 
 		float near = 0.01f;
 		float far = 10.f;
-
-		glm::mat4 model(1.f);
 
 		glm::mat4 view(1.f);
 		view = glm::translate(view, {0.f, 0.f, -camera_distance});
 		view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
 		view = glm::rotate(view, view_azimuth, {0.f, 1.f, 0.f});
+		view = glm::translate(view, {0.f, -camera_target, 0.f});
 
 		glm::mat4 projection = glm::mat4(1.f);
 		projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
+
+		glBindTexture(GL_TEXTURE_2D, shadow_map);
 
 		glUseProgram(program);
 		glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
 		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
+		glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
 
 		glUniform3f(ambient_location, 0.2f, 0.2f, 0.2f);
 		glUniform3fv(light_direction_location, 1, reinterpret_cast<float *>(&light_direction));
@@ -400,6 +565,11 @@ int main() try
 
 		glBindVertexArray(vao);
 		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
+
+		glUseProgram(debug_program);
+		glBindTexture(GL_TEXTURE_2D, shadow_map);
+		glBindVertexArray(debug_vao);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		SDL_GL_SwapWindow(window);
 	}
