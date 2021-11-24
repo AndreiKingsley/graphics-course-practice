@@ -288,7 +288,7 @@ int main() try {
     std::cout << "Loaded " << vertices.size() << " vertices, " << indices.size() << " indices, " << bones.size()
               << " bones" << std::endl;
 
-
+    /*
     for (auto &pose: poses) {
         for (size_t i = 0; i < bones.size(); i++) {
             if (bones[i].parent_id != -1) {
@@ -298,6 +298,7 @@ int main() try {
             }
         }
     }
+     */
 
     GLuint vao, vbo, ebo;
     glGenVertexArrays(1, &vao);
@@ -406,6 +407,34 @@ int main() try {
             auto &cur_pose = poses[cur_pose_ind];
             auto &next_pose = poses[next_pose_ind];
 
+            auto n_bones = bones.size();
+            bone_pose bone_poses[n_bones];
+
+            for (size_t i = 0; i < n_bones; ++i) {
+
+                auto cur_bone_pose = cur_pose[i];
+                auto next_bone_pose = next_pose[i];
+
+                bone_pose transformed = {
+                        glm::slerp(cur_bone_pose.rotation, next_bone_pose.rotation, interp_param),
+                        glm::mix(cur_bone_pose.scale, next_bone_pose.scale, interp_param),
+                        glm::mix(cur_bone_pose.translation, next_bone_pose.translation, interp_param),
+                };
+
+                auto parent_id = bones[i].parent_id;
+
+                if (parent_id != -1) {
+                    transformed = bone_poses[parent_id] * transformed;
+                }
+
+                bone_poses[i] = transformed;
+
+                glUniform4fv(bone_rotation_location(i), 1, (float *) &transformed.rotation);
+                glUniform3fv(bone_translation_location(i), 1, (float *) &transformed.translation);
+                glUniform1f(bone_scale_location(i), transformed.scale);
+            }
+
+            /*
             for (size_t i = 0; i < cur_pose.size(); i++) {
                 auto rot = glm::slerp(cur_pose[i].rotation, next_pose[i].rotation, interp_param);
 
@@ -415,6 +444,8 @@ int main() try {
                 glUniform3fv(bone_translation_location(i), 1, (float *) &trans);
                 glUniform1f(bone_scale_location(i), scale);
             }
+             */
+
         }
 
         glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
