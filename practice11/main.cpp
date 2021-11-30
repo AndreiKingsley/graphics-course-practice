@@ -126,13 +126,17 @@ void main()
 const char fragment_shader_source[] =
 R"(#version 330 core
 
+uniform sampler2D tex_gray;
+uniform sampler1D tex_color;
+
 layout (location = 0) out vec4 out_color;
 
 in vec2 tex_coord;
 
 void main()
 {
-	out_color = vec4(tex_coord, 0.0, 1.0);
+    float gray = texture(tex_gray, tex_coord).r;
+	out_color = vec4(texture(tex_color, gray).rgb, gray);
 }
 )";
 
@@ -253,6 +257,10 @@ int main() try
 
     GLuint camera_pos_location = glGetUniformLocation(program, "camera_pos");
 
+    glUseProgram(program);
+    glUniform1i(glGetUniformLocation(program, "tex_gray"), 0);
+    glUniform1i(glGetUniformLocation(program, "tex_color"), 1);
+
 	std::default_random_engine rng;
 
     const size_t max_particles = 256;
@@ -292,6 +300,41 @@ int main() try
 
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void*)(offsetof(particle, rot_angle)));
+
+
+    std::ifstream texture_src("../particle.gray");
+    std::vector<char> texture_buffer(1024*1024);
+    std::cout << texture_src.good() << std::endl;
+    texture_src.read(texture_buffer.data(), texture_buffer.size());
+
+    GLuint texture_gray;
+    glGenTextures(1, &texture_gray);
+    glBindTexture(GL_TEXTURE_2D, texture_gray);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 1024, 1024, 0, GL_RED, GL_UNSIGNED_BYTE, texture_buffer.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+
+
+    unsigned char data[12] = {
+            255, 0, 0,
+            180, 180, 180,
+            100, 255, 30,
+            20, 20, 20,
+    };
+
+    GLuint texture_color;
+    glGenTextures(1, &texture_color);
+    glBindTexture(GL_TEXTURE_1D, texture_color);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage1D(GL_TEXTURE_1D, 0, GL_RGB, 3, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
 
     glPointSize(5.f);
@@ -401,6 +444,11 @@ int main() try
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(particle), particles.data(), GL_STATIC_DRAW);
 
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture_gray);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_1D, texture_color);
 
         glBindVertexArray(vao);
 		glDrawArrays(GL_POINTS, 0, particles.size());
