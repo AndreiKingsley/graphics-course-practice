@@ -18,6 +18,7 @@
 #include <sstream>
 #include <random>
 
+
 #define GLM_FORCE_SWIZZLE
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/vec3.hpp>
@@ -47,9 +48,17 @@ const char vertex_shader_source[] =
 R"(#version 330 core
 
 layout (location = 0) in vec3 in_position;
+layout (location = 1) in float size;
+layout (location = 2) in float rot_angle;
+
+out float out_size;
+out float out_rot_angle;
 
 void main()
 {
+    out_size = size;
+    out_rot_angle = rot_angle;
+
 	gl_Position = vec4(in_position, 1.0);
 }
 )";
@@ -61,14 +70,54 @@ uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
+uniform vec3 camera_pos;
+
 layout (points) in;
-layout (points, max_vertices = 1) out;
+layout (triangle_strip, max_vertices = 4) out;
+
+in float out_size[];
+in float out_rot_angle[];
+
+out vec2 tex_coord;
+
+vec3 slerp_orth(vec3 a, vec3 b, float t){
+    float theta = acos(0);
+    return normalize(a*sin((1-t)*theta) + b*sin(t*theta));
+}
 
 void main()
 {
+    float size = out_size[0];
+    float rot_angle = out_rot_angle[0];
+
 	vec3 center = gl_in[0].gl_Position.xyz;
-	gl_Position = projection * view * model * vec4(center, 1.0);
-	EmitVertex();
+
+    vec3 z = camera_pos - center;
+    vec3 x = cross(z, vec3(1, 0, 0));
+    vec3 y = cross(x, z);
+
+    vec3 x_norm = normalize(x);
+    vec3 y_norm = normalize(y);
+
+    vec3 x_rot = slerp_orth(x_norm, y_norm, rot_angle);
+    vec3 y_rot = normalize(cross(x_rot, z));
+
+    x_norm = x_rot;
+    y_norm = y_rot;
+
+    vec3 trans[] = vec3 [] (
+        x_norm * size + y_norm * size,
+        x_norm * size - y_norm * size,
+        -x_norm * size + y_norm * size,
+        -x_norm * size - y_norm * size
+    );
+
+    for(int i=0; i<4; ++i){
+        gl_Position = projection * view * model * vec4(center + trans[i], 1.0);
+        tex_coord = trans[i].xy;
+        EmitVertex();
+    }
+
 	EndPrimitive();
 }
 
@@ -79,9 +128,11 @@ R"(#version 330 core
 
 layout (location = 0) out vec4 out_color;
 
+in vec2 tex_coord;
+
 void main()
 {
-	out_color = vec4(1.0, 0.0, 0.0, 1.0);
+	out_color = vec4(tex_coord, 0.0, 1.0);
 }
 )";
 
@@ -127,7 +178,30 @@ GLuint create_program(Shaders ... shaders)
 struct particle
 {
 	glm::vec3 position;
+    glm::vec3 velocity;
+
+    float size;
+
+    float rot_angle;
+    float rot_speed;
 };
+
+particle create_particle(std::default_random_engine &rng){
+    particle p;
+    p.position.x = std::uniform_real_distribution<float>{-1.f, 1.f}(rng);
+    p.position.y = 0.f;
+    p.position.z = std::uniform_real_distribution<float>{-1.f, 1.f}(rng);
+
+    p.velocity.x = std::uniform_real_distribution<float>{-0.3f, 0.3f}(rng);
+    p.velocity.y = std::uniform_real_distribution<float>{0.1f, 0.6f}(rng);
+    p.velocity.z = std::uniform_real_distribution<float>{-0.3f, 0.3f}(rng);
+
+    p.size = std::uniform_real_distribution<float>{0.1f, 0.4f}(rng);
+
+    p.rot_angle = std::uniform_real_distribution<float>{0.f, 2 * (glm::pi<float>())}(rng);
+    p.rot_speed = std::uniform_real_distribution<float>{0.1f, 1.f}(rng);
+    return p;
+}
 
 int main() try
 {
@@ -176,15 +250,30 @@ int main() try
 	GLuint view_location = glGetUniformLocation(program, "view");
 	GLuint projection_location = glGetUniformLocation(program, "projection");
 
+    GLuint camera_pos_location = glGetUniformLocation(program, "camera_pos");
+
 	std::default_random_engine rng;
 
-	std::vector<particle> particles(256);
+    const size_t max_particles = 256;
+    const float acceleration = 0.05f;
+    const float size_reduction_speed = 2.f;
+
+	std::vector<particle> particles;
+    /*
 	for (auto & p : particles)
 	{
 		p.position.x = std::uniform_real_distribution<float>{-1.f, 1.f}(rng);
 		p.position.y = 0.f;
 		p.position.z = std::uniform_real_distribution<float>{-1.f, 1.f}(rng);
+
+        p.velocity = std::uniform_real_distribution<float>{0.1f, 0.6f}(rng);
+
+        p.size = std::uniform_real_distribution<float>{0.1f, 0.5f}(rng);
+
+        p.rot_angle = std::uniform_real_distribution<float>{0.f, 2 * (glm::pi<float>())}(rng);
+        p.rot_speed = std::uniform_real_distribution<float>{0.1f, 1.f}(rng);
 	}
+     */
 
 	GLuint vao, vbo;
 	glGenVertexArrays(1, &vao);
@@ -197,7 +286,14 @@ int main() try
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(particle), (void*)(0));
 
-	glPointSize(5.f);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void*)(offsetof(particle, size)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void*)(offsetof(particle, rot_angle)));
+
+
+    glPointSize(5.f);
 
 	auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -282,7 +378,30 @@ int main() try
 		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
 		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
 
-		glBindVertexArray(vao);
+        glUniform3fv(camera_pos_location, 1, reinterpret_cast<float *>(&camera_position));
+
+        if (particles.size() < max_particles){
+            particles.push_back(create_particle(rng));
+        }
+
+        for (auto & p : particles)
+        {
+            if (p.position.y >= 3){
+                p = create_particle(rng);
+            }
+
+            p.rot_angle += p.rot_speed * dt;
+
+            p.velocity.y += dt * acceleration;
+            p.position += p.velocity * dt;
+
+            p.size *= exp(-size_reduction_speed * dt);
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(particle), particles.data(), GL_STATIC_DRAW);
+
+
+        glBindVertexArray(vao);
 		glDrawArrays(GL_POINTS, 0, particles.size());
 
 		SDL_GL_SwapWindow(window);
