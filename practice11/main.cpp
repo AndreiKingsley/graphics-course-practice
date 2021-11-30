@@ -337,7 +337,7 @@ int main() try
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_DEPTH_TEST);
 
 
     glPointSize(5.f);
