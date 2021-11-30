@@ -196,6 +196,7 @@ particle create_particle(std::default_random_engine &rng){
     p.velocity.y = std::uniform_real_distribution<float>{0.1f, 0.6f}(rng);
     p.velocity.z = std::uniform_real_distribution<float>{-0.3f, 0.3f}(rng);
 
+
     p.size = std::uniform_real_distribution<float>{0.1f, 0.4f}(rng);
 
     p.rot_angle = std::uniform_real_distribution<float>{0.f, 2 * (glm::pi<float>())}(rng);
@@ -255,8 +256,8 @@ int main() try
 	std::default_random_engine rng;
 
     const size_t max_particles = 256;
-    const float acceleration = 0.05f;
-    const float size_reduction_speed = 2.f;
+    const float acceleration = 0.5f;
+    const float size_reduction_speed = 0.5f;
 
 	std::vector<particle> particles;
     /*
