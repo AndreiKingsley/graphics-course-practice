@@ -112,9 +112,11 @@ void main()
         -x_norm * size - y_norm * size
     );
 
+    float vertex_vectors[] = float [] (1, 1, 1, -1, -1, 1, -1, -1);
+
     for(int i=0; i<4; ++i){
         gl_Position = projection * view * model * vec4(center + trans[i], 1.0);
-        tex_coord = trans[i].xy;
+        tex_coord = vec2((vertex_vectors[2 * i] + 1) / 2, (vertex_vectors[2 * i + 1] + 1) / 2);
         EmitVertex();
     }
 
@@ -335,6 +337,7 @@ int main() try
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glEnable(GL_DEPTH_TEST);
 
 
     glPointSize(5.f);
